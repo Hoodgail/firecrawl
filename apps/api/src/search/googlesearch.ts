@@ -4,14 +4,24 @@ import { SearchResult } from "../../src/lib/entities";
 import { logger } from "../../src/lib/logger";
 import https from 'https';
 
+// The correct way to expose process.env types is to declare it
+declare const process: {
+  env: {
+    PROXY_SERVER?: string;
+    PROXY_USERNAME?: string;
+    PROXY_PASSWORD?: string;
+    [key: string]: string | undefined;
+  }
+};
+
 const getRandomInt = (min: number, max: number): number => Math.floor(Math.random() * (max - min + 1)) + min;
 
 export function get_useragent(): string {
-    const lynx_version = `Lynx/${getRandomInt(2, 3)}.${getRandomInt(8, 9)}.${getRandomInt(0, 2)}`;
-    const libwww_version = `libwww-FM/${getRandomInt(2, 3)}.${getRandomInt(13, 15)}`;
-    const ssl_mm_version = `SSL-MM/${getRandomInt(1, 2)}.${getRandomInt(3, 5)}`;
-    const openssl_version = `OpenSSL/${getRandomInt(1, 3)}.${getRandomInt(0, 4)}.${getRandomInt(0, 9)}`;
-    return `${lynx_version} ${libwww_version} ${ssl_mm_version} ${openssl_version}`;
+  const lynx_version = `Lynx/${getRandomInt(2, 3)}.${getRandomInt(8, 9)}.${getRandomInt(0, 2)}`;
+  const libwww_version = `libwww-FM/${getRandomInt(2, 3)}.${getRandomInt(13, 15)}`;
+  const ssl_mm_version = `SSL-MM/${getRandomInt(1, 2)}.${getRandomInt(3, 5)}`;
+  const openssl_version = `OpenSSL/${getRandomInt(1, 3)}.${getRandomInt(0, 4)}.${getRandomInt(0, 9)}`;
+  return `${lynx_version} ${libwww_version} ${ssl_mm_version} ${openssl_version}`;
 }
 
 async function _req(
@@ -27,7 +37,7 @@ async function _req(
 ) {
   const params = {
     q: term,
-    num: results+2, // Number of results to return
+    num: results + 2, // Number of results to return
     hl: lang,
     gl: country,
     safe: "active",
@@ -40,17 +50,31 @@ async function _req(
     params["filter"] = filter;
   }
   var agent = get_useragent();
+
+  let proxyConfig = proxies;
+  if (process.env.PROXY_SERVER) {
+    const [host, port] = process.env.PROXY_SERVER.split(':');
+    proxyConfig = {
+      host,
+      port: parseInt(port || '80', 10),
+      auth: process.env.PROXY_USERNAME && process.env.PROXY_PASSWORD ? {
+        username: process.env.PROXY_USERNAME,
+        password: process.env.PROXY_PASSWORD
+      } : undefined
+    };
+  }
+
   try {
     const resp = await axios.get("https://www.google.com/search", {
       headers: {
         "User-Agent": agent,
-          "Accept": "*/*"
+        "Accept": "*/*"
       },
       params: params,
-      proxy: proxies,
+      proxy: proxyConfig,
       timeout: timeout,
       httpsAgent: new https.Agent({
-        rejectUnauthorized: true 
+        rejectUnauthorized: true
       }),
       withCredentials: true
     });
@@ -58,8 +82,8 @@ async function _req(
   } catch (error) {
     if (error.response && error.response.status === 429) {
       logger.warn("Google Search: Too many requests, try again later.", {
-          status: error.response.status,
-          statusText: error.response.statusText
+        status: error.response.status,
+        statusText: error.response.statusText
       });
       throw new Error("Google Search: Too many requests, try again later.");
     }
@@ -123,24 +147,24 @@ export async function googleSearch(
       }
 
       for (const result of result_block) {
-          const link_tag = result.querySelector("a[href]") as HTMLAnchorElement;
-          const title_tag = link_tag ? link_tag.querySelector("span.CVA68e") : null;
-          const description_tag = result.querySelector("span.FrIlee");
+        const link_tag = result.querySelector("a[href]") as HTMLAnchorElement;
+        const title_tag = link_tag ? link_tag.querySelector("span.CVA68e") : null;
+        const description_tag = result.querySelector("span.FrIlee");
 
-          if (link_tag && title_tag && description_tag) {
-              const link = decodeURIComponent(link_tag.href.split("&")[0].replace("/url?q=", ""));
-              if (fetched_links.has(link) && unique) continue;
-              fetched_links.add(link);
-              const title = title_tag.textContent || "";
-              const description = description_tag.textContent || "";
-              fetched_results++;
-              new_results++;
-              if (link && title && description) {
-                start += 1
-                  results.push(new SearchResult(link, title, description));
-              }
-              if (fetched_results >= num_results) break;
+        if (link_tag && title_tag && description_tag) {
+          const link = decodeURIComponent(link_tag.href.split("&")[0].replace("/url?q=", ""));
+          if (fetched_links.has(link) && unique) continue;
+          fetched_links.add(link);
+          const title = title_tag.textContent || "";
+          const description = description_tag.textContent || "";
+          fetched_results++;
+          new_results++;
+          if (link && title && description) {
+            start += 1
+            results.push(new SearchResult(link, title, description));
           }
+          if (fetched_results >= num_results) break;
+        }
       }
 
       await new Promise((resolve) =>
